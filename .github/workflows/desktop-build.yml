@@ -1,0 +1,119 @@
+name: Desktop build
+
+# Build and test the Desktop app on every pushed commit, independent of the
+# path-aware CI classifier, and publish the unsigned Windows installer.
+on:
+  push:
+    branches:
+      - '**'
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: windows-desktop-build
+          workspaces: |
+            . -> target
+            apps/desktop/src-tauri -> target
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            apps/desktop/package-lock.json
+      - name: Check Desktop Rust formatting
+        shell: pwsh
+        run: |
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+          if ($LASTEXITCODE -ne 0) { throw "Desktop cargo fmt check failed" }
+      - name: Install shared frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Install Desktop dependencies
+        run: npm ci --prefix apps/desktop
+      - name: Check Desktop frontend
+        run: |
+          npm --prefix apps/desktop run typecheck
+          npm --prefix apps/desktop test
+          npm --prefix apps/desktop run build
+      - name: Check Desktop Rust
+        shell: pwsh
+        run: |
+          cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
+          if ($LASTEXITCODE -ne 0) { throw "Desktop cargo check failed" }
+          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if ($LASTEXITCODE -ne 0) { throw "Desktop cargo test failed" }
+      - name: Build WebCodex runtime
+        id: runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $source = (git rev-parse HEAD).Trim()
+          $short = (git rev-parse --short=12 HEAD).Trim()
+          $version = (node -e "console.log(require('./npm/webcodex/package.json').version)").Trim()
+          $builtAt = [Int64]((git show -s --format=%ct HEAD).Trim())
+          $env:WEBCODEX_BUILT_AT = "$builtAt"
+          $env:WEBCODEX_GIT_COMMIT = $source
+          $env:WEBCODEX_GIT_DIRTY = "false"
+          cargo build --locked --profile dogfood -p webcodex -p webcodex-cli -p webcodex-runner
+          if ($LASTEXITCODE -ne 0) { throw "WebCodex runtime build failed" }
+          "source=$source" >> $env:GITHUB_OUTPUT
+          "short=$short" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "built_at=$builtAt" >> $env:GITHUB_OUTPUT
+      - name: Stage runtime for Desktop bundle
+        id: desktop_bundle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:RUNNER_TEMP "webcodex-desktop-build-bundle"
+          & .\scripts\prepare_desktop_bundle.ps1 `
+            -BinDir "target\dogfood" `
+            -Version "${{ steps.runtime.outputs.version }}" `
+            -SourceSha "${{ steps.runtime.outputs.source }}" `
+            -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
+            -OutputDir $stage
+          "config=$(Join-Path $stage 'tauri.bundle.conf.json')" >> $env:GITHUB_OUTPUT
+      - name: Build unsigned NSIS installer
+        working-directory: apps/desktop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $env:CARGO_TARGET_DIR = Join-Path $env:GITHUB_WORKSPACE "target\desktop-ci-tauri"
+          npm exec tauri -- build --bundles nsis --config "${{ steps.desktop_bundle.outputs.config }}" --ci --no-sign
+          if ($LASTEXITCODE -ne 0) { throw "Tauri NSIS build failed" }
+          $bundleDir = Join-Path $env:CARGO_TARGET_DIR "release\bundle\nsis"
+          $built = @(Get-ChildItem -LiteralPath $bundleDir -Filter "*-setup.exe" -File)
+          if ($built.Count -ne 1) { throw "Expected exactly one NSIS installer, found $($built.Count)" }
+          $dist = Join-Path $env:GITHUB_WORKSPACE "target\desktop-build-dist"
+          New-Item -ItemType Directory -Force -Path $dist | Out-Null
+          Copy-Item -LiteralPath $built[0].FullName -Destination (Join-Path $dist "webcodex-desktop-${{ steps.runtime.outputs.short }}-v${{ steps.runtime.outputs.version }}-win32-x64-setup.exe")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: webcodex-desktop-win32-x64-${{ steps.runtime.outputs.short }}
+          path: target/desktop-build-dist/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

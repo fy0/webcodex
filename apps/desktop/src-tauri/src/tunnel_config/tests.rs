@@ -26,6 +26,7 @@ fn create(name: &str, tunnel_id: &str, key: &str) -> TunnelProfileRequest {
         api_key: Some(key.into()),
         autostart: true,
         expected_revision: None,
+        proxy: None,
     }
 }
 fn edit(
@@ -41,6 +42,7 @@ fn edit(
         api_key: key.map(str::to_owned),
         autostart: true,
         expected_revision: None,
+        proxy: None,
     }
 }
 fn command_key(store: &TunnelConfig, id: TunnelProfileId) -> String {
@@ -279,6 +281,105 @@ fn duplicate_ids_and_tunnel_ids_are_rejected_without_retiring_a_valid_pair() {
     );
     let mut bad = config.stored.clone();
     bad.profiles.push(bad.profiles[0].clone());
+    fs::write(fixture.path(), serde_json::to_vec(&bad).unwrap()).unwrap();
+    assert!(TunnelConfig::load(&fixture.path(), true).invalid);
+}
+
+#[test]
+fn per_profile_proxy_overrides_persist_independently_and_change_the_launch() {
+    let fixture = Fixture::new();
+    let mut config = TunnelConfig::default();
+    let a = config
+        .update_profile(&fixture.path(), create("Personal", "tunnel_a", "fixture-a"))
+        .unwrap();
+    let b = config
+        .update_profile(&fixture.path(), create("Work", "tunnel_b", "fixture-b"))
+        .unwrap();
+    assert!(config.proxy_for(a).is_none());
+    assert!(!fs::read_to_string(fixture.path())
+        .unwrap()
+        .contains("proxy"));
+
+    let previous = config.clone();
+    let mut request = edit(a, "Personal", "tunnel_a", None);
+    request.proxy = Some(TunnelProxyConfig {
+        mode: TunnelProxyMode::Custom,
+        custom_url: Some("127.0.0.1:7890".into()),
+    });
+    config.update_profile(&fixture.path(), request).unwrap();
+    assert!(!config.same_launch_as(&previous, a));
+    assert!(config.same_launch_as(&previous, b));
+
+    let mut request = edit(b, "Work", "tunnel_b", None);
+    request.proxy = Some(TunnelProxyConfig {
+        mode: TunnelProxyMode::Direct,
+        custom_url: Some("http://ignored.example.test:1".into()),
+    });
+    config.update_profile(&fixture.path(), request).unwrap();
+
+    let reloaded = TunnelConfig::load(&fixture.path(), false);
+    assert!(!reloaded.invalid);
+    assert_eq!(
+        reloaded.proxy_for(a),
+        Some(&TunnelProxyConfig {
+            mode: TunnelProxyMode::Custom,
+            custom_url: Some("http://127.0.0.1:7890".into()),
+        })
+    );
+    assert_eq!(
+        reloaded.proxy_for(b),
+        Some(&TunnelProxyConfig {
+            mode: TunnelProxyMode::Direct,
+            custom_url: None,
+        })
+    );
+    let projected = reloaded.profiles();
+    assert_eq!(
+        projected.iter().find(|p| p.id == a).unwrap().proxy,
+        reloaded.proxy_for(a).cloned()
+    );
+
+    let mut cleared = reloaded.clone();
+    cleared
+        .update_profile(&fixture.path(), edit(a, "Personal", "tunnel_a", None))
+        .unwrap();
+    assert!(cleared.proxy_for(a).is_none());
+    assert!(cleared.proxy_for(b).is_some());
+}
+
+#[test]
+fn invalid_per_profile_proxy_is_rejected_without_writing() {
+    let fixture = Fixture::new();
+    let mut config = TunnelConfig::default();
+    let a = config
+        .update_profile(&fixture.path(), create("Personal", "tunnel_a", "fixture-a"))
+        .unwrap();
+    let before = fs::read(fixture.path()).unwrap();
+    for url in [
+        None,
+        Some("http://user:secret@127.0.0.1:7890"),
+        Some("socks5://127.0.0.1:1080"),
+    ] {
+        let mut request = edit(a, "Personal", "tunnel_a", None);
+        request.proxy = Some(TunnelProxyConfig {
+            mode: TunnelProxyMode::Custom,
+            custom_url: url.map(str::to_owned),
+        });
+        assert_eq!(
+            config
+                .update_profile(&fixture.path(), request)
+                .unwrap_err()
+                .code,
+            "tunnel_proxy_invalid"
+        );
+    }
+    assert_eq!(fs::read(fixture.path()).unwrap(), before);
+
+    let mut bad = config.stored.clone();
+    bad.profiles[0].proxy = Some(TunnelProxyConfig {
+        mode: TunnelProxyMode::Custom,
+        custom_url: Some("socks5://127.0.0.1:1080".into()),
+    });
     fs::write(fixture.path(), serde_json::to_vec(&bad).unwrap()).unwrap();
     assert!(TunnelConfig::load(&fixture.path(), true).invalid);
 }

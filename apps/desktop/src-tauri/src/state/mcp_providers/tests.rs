@@ -366,6 +366,7 @@ async fn tunnel_configuration_edit_does_not_change_runner_generation_or_mcp_desi
             api_key: Some("independent-tunnel-fixture".into()),
             autostart: true,
             expected_revision: None,
+            proxy: None,
         })
         .await
         .unwrap();
@@ -377,6 +378,7 @@ async fn tunnel_configuration_edit_does_not_change_runner_generation_or_mcp_desi
         api_key: Some("replacement-tunnel-fixture".into()),
         autostart: true,
         expected_revision: Some(connection.revision),
+        proxy: None,
     })
     .await
     .unwrap();

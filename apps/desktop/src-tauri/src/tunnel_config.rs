@@ -2,7 +2,9 @@
 //! neither Debug nor public Serialize; only the dedicated safe projection leaves here.
 use crate::connection_id::TunnelProfileId;
 use crate::error::{DesktopError, DesktopResult};
-use crate::models::{OpenAiTunnelConfigSnapshot, TunnelConfigSource};
+use crate::models::{
+    OpenAiTunnelConfigSnapshot, TunnelConfigSource, TunnelProxyConfig, TunnelProxyMode,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, File};
@@ -31,6 +33,9 @@ struct TunnelProfile {
     enabled: bool,
     autostart: bool,
     revision: u64,
+    // None follows the Desktop-wide Tunnel proxy preference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    proxy: Option<TunnelProxyConfig>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -50,6 +55,7 @@ pub struct TunnelProfileConfigSnapshot {
     pub autostart: bool,
     pub revision: u64,
     pub source: TunnelConfigSource,
+    pub proxy: Option<TunnelProxyConfig>,
 }
 
 #[derive(Clone)]
@@ -82,6 +88,8 @@ pub struct TunnelProfileRequest {
     pub api_key: Option<String>,
     pub autostart: bool,
     pub expected_revision: Option<u64>,
+    #[serde(default)]
+    pub proxy: Option<TunnelProxyConfig>,
 }
 
 // First-run/Quick Share legacy default controls; never select an arbitrary profile.
@@ -233,6 +241,7 @@ impl TunnelConfig {
                     autostart: profile.autostart,
                     revision: profile.revision,
                     source: safe.source,
+                    proxy: profile.proxy.clone(),
                 })
             })
             .collect()
@@ -258,9 +267,18 @@ impl TunnelConfig {
             self.stored.profiles.iter().find(|p| p.id == id),
             other.stored.profiles.iter().find(|p| p.id == id),
         ) {
-            (Some(a), Some(b)) => a.credentials == b.credentials,
+            (Some(a), Some(b)) => a.credentials == b.credentials && a.proxy == b.proxy,
             _ => false,
         }
+    }
+
+    /// The profile's own proxy override; None follows the Desktop-wide preference.
+    pub fn proxy_for(&self, id: TunnelProfileId) -> Option<&TunnelProxyConfig> {
+        self.stored
+            .profiles
+            .iter()
+            .find(|p| p.id == id)
+            .and_then(|p| p.proxy.as_ref())
     }
 
     pub fn is_invalid(&self) -> bool {
@@ -304,6 +322,7 @@ impl TunnelConfig {
             })
             .ok_or_else(invalid)?;
         validate_pair(&tunnel_id, &api_key)?;
+        let proxy = request.proxy.map(normalize_proxy).transpose()?;
         if self
             .profiles()
             .iter()
@@ -322,6 +341,7 @@ impl TunnelConfig {
             enabled: previous.map(|p| p.enabled).unwrap_or(true),
             autostart: request.autostart,
             revision: next_revision(previous.map(|p| p.revision))?,
+            proxy,
         };
         let mut stored = self.stored.clone();
         match stored.profiles.iter().position(|p| p.id == id) {
@@ -402,6 +422,7 @@ impl TunnelConfig {
                     .map(|p| p.name.clone())
                     .unwrap_or_else(|| "ChatGPT".into());
                 let autostart = existing.map(|p| p.autostart).unwrap_or(true);
+                let proxy = existing.and_then(|p| p.proxy.clone());
                 self.update_profile(
                     path,
                     TunnelProfileRequest {
@@ -411,6 +432,7 @@ impl TunnelConfig {
                         api_key,
                         autostart,
                         expected_revision: None,
+                        proxy,
                     },
                 )?;
                 Ok(())
@@ -429,6 +451,7 @@ impl TunnelConfig {
                     profile.name = next.profiles[index].name.clone();
                     profile.enabled = next.profiles[index].enabled;
                     profile.autostart = next.profiles[index].autostart;
+                    profile.proxy = next.profiles[index].proxy.clone();
                     profile.revision = next_revision(Some(next.profiles[index].revision))?;
                     next.profiles[index] = profile;
                 } else {
@@ -505,7 +528,31 @@ fn legacy_profile(credentials: Option<Credentials>, autostart: bool) -> TunnelPr
         enabled: autostart,
         autostart,
         revision: 1,
+        proxy: None,
     }
+}
+
+fn normalize_proxy(config: TunnelProxyConfig) -> DesktopResult<TunnelProxyConfig> {
+    let custom_url = match config.mode {
+        TunnelProxyMode::Custom => Some(
+            config
+                .custom_url
+                .as_deref()
+                .and_then(crate::platform::normalize_proxy_server)
+                .ok_or_else(|| {
+                    DesktopError::new(
+                        "tunnel_proxy_invalid",
+                        "The Tunnel proxy must be an HTTP or HTTPS proxy URL without embedded credentials",
+                        "Use a value such as http://127.0.0.1:7890, or follow the global proxy setting.",
+                    )
+                })?,
+        ),
+        TunnelProxyMode::Auto | TunnelProxyMode::Direct => None,
+    };
+    Ok(TunnelProxyConfig {
+        mode: config.mode,
+        custom_url,
+    })
 }
 
 fn profile_credentials_snapshot(profile: &TunnelProfile) -> OpenAiTunnelConfigSnapshot {
@@ -559,6 +606,11 @@ fn validate_store(stored: &StoredProfiles) -> DesktopResult<()> {
             return Err(invalid());
         }
         validate_name(&profile.name)?;
+        if let Some(proxy) = &profile.proxy {
+            if normalize_proxy(proxy.clone()).ok().as_ref() != Some(proxy) {
+                return Err(invalid());
+            }
+        }
         if let Some(pair) = &profile.credentials {
             validate_pair(&pair.tunnel_id, &pair.api_key)?;
             if !tunnels.insert(&pair.tunnel_id) {

@@ -18,6 +18,7 @@ fn config(id: TunnelProfileId) -> TunnelProfileConfigSnapshot {
         autostart: true,
         revision: 1,
         source: TunnelConfigSource::File,
+        proxy: None,
     }
 }
 fn snapshot(ids: &[TunnelProfileId]) -> ConnectionsSnapshot {

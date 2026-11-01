@@ -10,6 +10,8 @@ export interface TunnelConnection {
   autostart: boolean;
   revision: number;
   source: "file" | "environment" | "invalid";
+  /** Per-connection proxy override; null follows the global Tunnel proxy setting. */
+  proxy?: TunnelProxyOverride | null;
   lifecycle: ConnectionLifecycle;
   pid: number | null;
   health: "unknown" | "healthy" | "degraded";
@@ -42,6 +44,11 @@ export interface TunnelProfileRequest {
   api_key: string | null;
   autostart: boolean;
   expected_revision: number | null;
+  proxy: TunnelProxyOverride | null;
+}
+export interface TunnelProxyOverride {
+  mode: "auto" | "direct" | "custom";
+  custom_url?: string | null;
 }
 export type TunnelProfileAction = "start" | "stop" | "restart" | "delete";
 export interface McpProviderProfile {

@@ -37,6 +37,7 @@ fn native_connection_observations_survive_desktop_state_reads() {
             autostart: true,
             revision: 1,
             source: crate::models::TunnelConfigSource::File,
+            proxy: None,
         },
         runtime: ConnectionRuntimeSnapshot {
             lifecycle: ConnectionLifecycle::Running,
@@ -87,6 +88,7 @@ async fn connection_resume_uses_current_profile_preferences_without_enabling_sto
                         api_key: Some("fixture-key".into()),
                         autostart,
                         expected_revision: None,
+                        proxy: None,
                     },
                 )
                 .unwrap();
