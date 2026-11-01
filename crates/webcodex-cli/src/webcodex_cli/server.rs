@@ -42,6 +42,7 @@ pub(crate) async fn run_server_tunnel_with_stop(
     webcodex::load_service_environment_file(&opts.env_file)?;
     let local_server_url = derive_regular_tunnel_server_url(&opts.env_file)?;
     let bootstrap_token = derive_regular_tunnel_bootstrap_token(&opts.env_file)?;
+    let proxy = derive_regular_tunnel_proxy(&opts.env_file)?;
     let runtime_parent = opts
         .env_file
         .parent()
@@ -53,10 +54,32 @@ pub(crate) async fn run_server_tunnel_with_stop(
             bootstrap_token,
             runtime_parent,
             stop_on_stdin_eof: opts.stop_on_stdin_eof,
+            proxy,
         },
         stop,
     )
     .await
+}
+
+pub(crate) fn derive_regular_tunnel_proxy(
+    env_file: &Path,
+) -> Result<Option<webcodex_environment::TunnelProxy>, String> {
+    // A service's exact saved route wins over ambient proxy environment.
+    let value = match read_env_file_value(env_file, webcodex_environment::TUNNEL_PROXY_ENV)? {
+        Some(value) => Some(value),
+        None => match std::env::var(webcodex_environment::TUNNEL_PROXY_ENV) {
+            Ok(value) => Some(value),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err("Tunnel proxy is not valid UTF-8".into())
+            }
+        },
+    };
+    value
+        .as_deref()
+        .map(webcodex_environment::TunnelProxy::parse)
+        .transpose()
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn derive_regular_tunnel_bootstrap_token(env_file: &Path) -> Result<String, String> {

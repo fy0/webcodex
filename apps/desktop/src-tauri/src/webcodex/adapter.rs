@@ -1049,6 +1049,10 @@ fn configure_local_loopback_bypass_environment(command: &mut Command) {
 }
 
 fn configure_tunnel_proxy_environment(command: &mut Command, proxy: Option<&str>) {
+    command.env(
+        webcodex_environment::TUNNEL_PROXY_ENV,
+        proxy.unwrap_or("direct"),
+    );
     for key in [
         "HTTP_PROXY",
         "HTTPS_PROXY",

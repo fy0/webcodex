@@ -59,6 +59,86 @@ fn native_connection_observations_survive_desktop_state_reads() {
 }
 
 #[tokio::test]
+async fn connection_proxy_override_and_projection_ignore_an_unusable_global_proxy() {
+    let fixture = Fixture::new();
+    let app = fixture.app();
+    let mut slot = app.core.lock().await;
+    let core = slot.as_mut().unwrap();
+    core.config.persistent_environment = None;
+    core.tunnel_config = crate::tunnel_config::TunnelConfig::default();
+    core.config.tunnel_proxy = TunnelProxyConfig {
+        mode: TunnelProxyMode::Custom,
+        custom_url: Some("http://127.0.0.1:1".into()),
+    };
+    let path = fixture.0.join("tunnels.json");
+    let mut ids = Vec::new();
+    for (index, proxy) in [
+        Some(TunnelProxyConfig {
+            mode: TunnelProxyMode::Custom,
+            custom_url: Some("http://127.0.0.1:7891".into()),
+        }),
+        Some(TunnelProxyConfig {
+            mode: TunnelProxyMode::Direct,
+            custom_url: None,
+        }),
+        None,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        ids.push(
+            core.tunnel_config
+                .update_profile(
+                    &path,
+                    TunnelProfileRequest {
+                        id: None,
+                        name: format!("Connection {index}"),
+                        tunnel_id: format!("tunnel_{index}"),
+                        api_key: Some("fixture-key".into()),
+                        autostart: false,
+                        expected_revision: None,
+                        proxy,
+                    },
+                )
+                .unwrap(),
+        );
+    }
+    assert_eq!(
+        core.connection_proxy(ids[0]).unwrap().url.as_deref(),
+        Some("http://127.0.0.1:7891")
+    );
+    assert_eq!(core.connection_proxy(ids[1]).unwrap().url, None);
+    assert_eq!(
+        core.connection_proxy(ids[2]).unwrap().url.as_deref(),
+        Some("http://127.0.0.1:1")
+    );
+    core.project_connections();
+    let profiles = &core.snapshot.connections.profiles;
+    assert_eq!(
+        profiles[0]
+            .runtime
+            .proxy_route
+            .as_ref()
+            .unwrap()
+            .custom_url
+            .as_deref(),
+        Some("http://127.0.0.1:7891")
+    );
+    assert_eq!(
+        profiles[1]
+            .runtime
+            .proxy_route
+            .as_ref()
+            .unwrap()
+            .effective_source,
+        "direct"
+    );
+    core.config.tunnel_proxy.custom_url = Some("not a proxy".into());
+    assert!(core.connection_proxy(ids[2]).is_err());
+    assert!(core.connection_proxy(ids[0]).is_ok());
+}
+
+#[tokio::test]
 async fn connection_resume_uses_current_profile_preferences_without_enabling_stopped_profiles() {
     let fixture = Fixture::new();
     let app = fixture.app();

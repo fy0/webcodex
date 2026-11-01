@@ -1281,6 +1281,42 @@ impl DesktopCore {
         };
         self.config.tunnel_proxy = TunnelProxyConfig { mode, custom_url };
         self.save_config().await?;
+        if self.snapshot.readiness.runtime_ready
+            && self.snapshot.quick_share.is_none()
+            && self.config.topology.as_ref().is_some_and(|topology| {
+                topology.experience == Experience::Full
+                    && matches!(topology.server, ServerTopology::Local)
+            })
+        {
+            let inherited: Vec<_> = self
+                .tunnel_config
+                .profiles()
+                .into_iter()
+                .filter(|profile| profile.enabled && profile.proxy.is_none())
+                .map(|profile| profile.id)
+                .collect();
+            let mut failure = None;
+            // Stop all inheritors before attempting a potentially unreachable
+            // replacement, so a readiness failure cannot leave peers on old routes.
+            for id in &inherited {
+                cancellation.check()?;
+                if let Err(error) = self.stop_connection_process(*id).await {
+                    failure.get_or_insert(error);
+                }
+            }
+            if let Some(error) = failure {
+                return Err(tunnel_apply_error(error));
+            }
+            for id in inherited {
+                cancellation.check()?;
+                if let Err(error) = self.start_connection_process(id, cancellation).await {
+                    failure.get_or_insert(error);
+                }
+            }
+            if let Some(error) = failure {
+                return Err(tunnel_apply_error(error));
+            }
+        }
         self.get_state().await
     }
 
@@ -3464,10 +3500,14 @@ fn apply_config_projection(snapshot: &mut DesktopStateSnapshot, config: &StoredD
         .collect();
     snapshot.runtime_autostart = runtime_autostart(config);
     snapshot.preferred_connection = preferred_connection(config);
-    snapshot.tunnel_proxy = match effective_tunnel_proxy(&config.tunnel_proxy) {
+    snapshot.tunnel_proxy = tunnel_proxy_snapshot(&config.tunnel_proxy);
+}
+
+fn tunnel_proxy_snapshot(config: &TunnelProxyConfig) -> TunnelProxySnapshot {
+    match effective_tunnel_proxy(config) {
         Ok(proxy) => TunnelProxySnapshot {
-            mode: config.tunnel_proxy.mode,
-            custom_url: config.tunnel_proxy.custom_url.clone(),
+            mode: config.mode,
+            custom_url: config.custom_url.clone(),
             effective_source: proxy.source.to_string(),
             effective_proxy_present: proxy.url.is_some(),
             system_proxy_detected: proxy.system_proxy_detected,
@@ -3475,14 +3515,14 @@ fn apply_config_projection(snapshot: &mut DesktopStateSnapshot, config: &StoredD
         Err(_) => {
             let system = crate::platform::system_http_proxy_candidate();
             TunnelProxySnapshot {
-                mode: config.tunnel_proxy.mode,
-                custom_url: config.tunnel_proxy.custom_url.clone(),
+                mode: config.mode,
+                custom_url: config.custom_url.clone(),
                 effective_source: "invalid_custom".to_string(),
                 effective_proxy_present: false,
                 system_proxy_detected: system.is_some(),
             }
         }
-    };
+    }
 }
 
 fn apply_openai_tunnel_configuration(snapshot: &mut DesktopStateSnapshot, config: &TunnelConfig) {

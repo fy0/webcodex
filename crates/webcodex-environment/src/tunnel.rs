@@ -118,10 +118,11 @@ impl NativeEnvironment {
         store: &EnvironmentStore,
         profile_id: &str,
         credentials: Option<&TunnelCredentials>,
+        proxy: Option<&TunnelProxy>,
     ) -> SetupResultValue<service::ServiceStatus> {
         let lock = store.lock()?;
         crate::ensure_upgrade_idle_under_lock(store)?;
-        self.configure_tunnel_under_lock(store, &lock, profile_id, credentials, true)
+        self.configure_tunnel_under_lock(store, &lock, profile_id, credentials, proxy, true)
             .await
     }
     pub(crate) async fn configure_tunnel_under_lock(
@@ -130,6 +131,7 @@ impl NativeEnvironment {
         _lock: &crate::storage::EnvironmentLock,
         profile_id: &str,
         credentials: Option<&TunnelCredentials>,
+        proxy: Option<&TunnelProxy>,
         start: bool,
     ) -> SetupResultValue<service::ServiceStatus> {
         let record = store
@@ -192,6 +194,30 @@ impl NativeEnvironment {
                     "This profile already contains another Tunnel identity or credential",
                 ));
             }
+        }
+        let saved = read_secret(path)?;
+        let (content, proxy_changed) = tunnel_proxy_content(saved.expose(), proxy)?;
+        if proxy_changed {
+            // Confirm a stopped service before replacing its route. A failed
+            // stop leaves the old configuration intact and fails this operation.
+            let status = ServiceManager::inspect(&spec).map_err(service_error)?;
+            if tunnel_proxy_requires_stop(&status)? {
+                let stopped = crate::privilege::service_operation_spec(
+                    store,
+                    &record,
+                    spec.clone(),
+                    ServiceOperation::Stop,
+                    None,
+                )
+                .await?;
+                if stopped.ownership != Ownership::Owned || stopped.running != Some(false) {
+                    return Err(diagnostic(
+                        "tunnel_stop_unconfirmed",
+                        "The Tunnel did not confirm stopping",
+                    ));
+                }
+            }
+            atomic_private_write(path, content.expose().as_bytes())?;
         }
         let health = spec.working_directory.join("readiness.json");
         if !health.exists() {
@@ -378,6 +404,43 @@ impl NativeEnvironment {
     }
 }
 
+fn tunnel_proxy_content(
+    content: &str,
+    proxy: Option<&TunnelProxy>,
+) -> SetupResultValue<(Secret, bool)> {
+    let Some(proxy) = proxy else {
+        return Ok((Secret::new(content.to_owned()), false));
+    };
+    // Revalidate deserialized migration input before writing an env assignment.
+    TunnelProxy::parse(proxy.value())?;
+    let previous = env_value(content, TUNNEL_PROXY_ENV);
+    let mut updated = format!("{TUNNEL_PROXY_ENV}={}\n", proxy.value());
+    for line in content.lines() {
+        if !line
+            .split_once('=')
+            .is_some_and(|(key, _)| key.trim() == TUNNEL_PROXY_ENV)
+        {
+            updated.push_str(line);
+            updated.push('\n');
+        }
+    }
+    Ok((
+        Secret::new(updated),
+        previous.as_deref() != Some(proxy.value()),
+    ))
+}
+
+fn tunnel_proxy_requires_stop(status: &service::ServiceStatus) -> SetupResultValue<bool> {
+    match status.ownership {
+        Ownership::Owned => Ok(status.running != Some(false)),
+        Ownership::Absent => Ok(false),
+        _ => Err(diagnostic(
+            "tunnel_owner",
+            "Tunnel service ownership cannot be verified",
+        )),
+    }
+}
+
 fn tunnel_install_required(status: &service::ServiceStatus) -> SetupResultValue<bool> {
     match status.ownership {
         Ownership::Absent => Ok(true),
@@ -500,6 +563,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn tunnel_proxy_changes_are_profile_local_and_survive_reconfiguration() {
+        let saved = "WEBCODEX_ADDR=127.0.0.1:8080\nCONTROL_PLANE_TUNNEL_ID=tunnel_fixture\nCONTROL_PLANE_API_KEY=fixture-key\n";
+        let a = TunnelProxy::parse("http://127.0.0.1:7891").unwrap();
+        let b = TunnelProxy::parse("http://127.0.0.1:7892").unwrap();
+        let (first, changed) = tunnel_proxy_content(saved, Some(&a)).unwrap();
+        assert!(changed);
+        let (second, changed) = tunnel_proxy_content(saved, Some(&b)).unwrap();
+        assert!(changed);
+        assert_eq!(
+            env_value(first.expose(), TUNNEL_PROXY_ENV).as_deref(),
+            Some(a.value())
+        );
+        assert_eq!(
+            env_value(second.expose(), TUNNEL_PROXY_ENV).as_deref(),
+            Some(b.value())
+        );
+        assert_eq!(
+            env_value(first.expose(), "CONTROL_PLANE_API_KEY").as_deref(),
+            Some("fixture-key")
+        );
+        let (unchanged, changed) = tunnel_proxy_content(first.expose(), Some(&a)).unwrap();
+        assert!(!changed);
+        assert_eq!(unchanged.expose(), first.expose());
+        let (retained, changed) = tunnel_proxy_content(first.expose(), None).unwrap();
+        assert!(!changed);
+        assert_eq!(retained.expose(), first.expose());
+        let (direct, changed) =
+            tunnel_proxy_content(first.expose(), Some(&TunnelProxy::parse("direct").unwrap()))
+                .unwrap();
+        assert!(changed);
+        assert_eq!(
+            env_value(direct.expose(), TUNNEL_PROXY_ENV).as_deref(),
+            Some("direct")
+        );
+        assert_eq!(direct.expose().matches(TUNNEL_PROXY_ENV).count(), 1);
+    }
+
+    #[test]
     fn running_owned_tunnel_skips_reinstall_and_ambiguous_state_fails_closed() {
         let mut status = service::ServiceStatus {
             id: "webcodex-tunnel-main".into(),
@@ -510,7 +611,11 @@ mod tests {
             detail: None,
         };
         assert!(!tunnel_install_required(&status).unwrap());
+        assert!(tunnel_proxy_requires_stop(&status).unwrap());
+        status.running = None;
+        assert!(tunnel_proxy_requires_stop(&status).unwrap());
         status.running = Some(false);
+        assert!(!tunnel_proxy_requires_stop(&status).unwrap());
         status.enabled = Some(false);
         assert!(tunnel_install_required(&status).unwrap());
         status.running = Some(true);
@@ -519,6 +624,7 @@ mod tests {
             "tunnel_service_state_uncertain"
         );
         status.ownership = Ownership::Foreign;
+        assert!(tunnel_proxy_requires_stop(&status).is_err());
         assert_eq!(
             tunnel_install_required(&status).unwrap_err().code,
             "tunnel_owner"

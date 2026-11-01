@@ -1,3 +1,5 @@
+import type { TunnelProxySnapshot } from "./topology";
+
 // Private values appear only in write-only requests, never in public snapshots.
 export type ConnectionLifecycle = "stopped" | "starting" | "running" | "stopping" | "error";
 export type ConnectionError = "start_failed" | "startup_timeout" | "process_exited" | "protocol_invalid" | "health_stale" | "tunnel_unavailable" | "local_mcp_unavailable" | "stop_failed";
@@ -12,6 +14,7 @@ export interface TunnelConnection {
   source: "file" | "environment" | "invalid";
   /** Per-connection proxy override; null follows the global Tunnel proxy setting. */
   proxy?: TunnelProxyOverride | null;
+  proxy_route?: TunnelProxySnapshot | null;
   lifecycle: ConnectionLifecycle;
   pid: number | null;
   health: "unknown" | "healthy" | "degraded";
@@ -82,4 +85,16 @@ export const EMPTY_CONNECTIONS: ConnectionsSnapshot = { profiles: [], running: 0
 export const EMPTY_MCP_PROVIDERS: McpProvidersSnapshot = { revision: 0, profiles: [], restart_required: false, config_error: false, max_enabled: 8 };
 export function connectionActive(profile: TunnelConnection): boolean {
   return profile.lifecycle === "starting" || profile.lifecycle === "running" || profile.lifecycle === "stopping" || (profile.lifecycle === "error" && profile.pid !== null);
+}
+
+export function connectionProxyRoute(profile: TunnelConnection, global: TunnelProxySnapshot): TunnelProxySnapshot {
+  if (profile.proxy_route) return profile.proxy_route;
+  if (!profile.proxy) return global;
+  const { mode, custom_url } = profile.proxy;
+  return {
+    mode, custom_url: custom_url ?? null,
+    effective_source: mode === "custom" ? "custom" : mode === "direct" ? "direct" : "unknown",
+    effective_proxy_present: mode === "custom",
+    system_proxy_detected: false,
+  };
 }

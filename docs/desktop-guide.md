@@ -55,7 +55,7 @@ Home and the sidebar label the local Runner as **Local task service** and count 
 
 ## Connections and recovery
 
-Connection cards show observed Tunnel and local MCP reachability. Failures include a specific reason and a shortcut to proxy settings, Runtime, or diagnostics. The page shows the current network route; failure guidance uses the failed attempt’s proxy evidence and never changes routes automatically.
+Connection cards show observed Tunnel and local MCP reachability and each connection's configured network route. Failures include a specific reason and a shortcut to that connection's proxy settings, Runtime, or diagnostics. Failure guidance uses the failed attempt's proxy evidence and never changes routes automatically.
 
 Use **Add Connection** or a connection card’s **Edit** button to enter the Tunnel ID and write-only API key. Both remain editable while the Tunnel is running or stopped. Save persists the configuration and replaces only an active Desktop-owned regular Tunnel; Server and Runner keep running. A stopped Tunnel stays stopped until explicitly started. Blank API key retains the saved key. Saved keys are never returned to the UI.
 
@@ -72,7 +72,9 @@ A real observed project call verifies prior client use, not current host presenc
 | An existing tunnel reports an error | Stop it, then start it again; stop failures remain visible and can be retried |
 | Tunnel ready but clipboard handoff failed | Use Copy Tunnel ID on Connection, or select the displayed ID and copy manually; no restart needed |
 | Tunnel ready, waiting for ChatGPT | Configure the Tunnel in ChatGPT and ask it to work in the intended workspace |
-**Settings → Network** controls automatic, direct, and custom HTTP proxy modes. Stop a running tunnel before changing its proxy, save, then start it again.
+**Settings → Network** controls the global Tunnel proxy preference. Each connection's **Edit** dialog can follow it or select its own automatic, direct, or custom HTTP(S) proxy. Saving a changed connection proxy restarts only that connection, including persistent services; Server, Runner, and other connections remain unchanged. Saved service routes survive Desktop exit and service restart.
+
+A custom proxy failure does not fall back to the global proxy or direct access. You can set an unreachable global custom proxy and give individual connections their own working proxies; connections following the global setting will fail instead of silently switching routes. This controls Tunnel traffic and connectivity probes, not an OS-wide outbound firewall. Tunnel-client downloads retain their existing download proxy behavior.
 
 ## Instructions, Skills, and native Tool Plugins
 

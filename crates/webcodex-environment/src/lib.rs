@@ -35,6 +35,8 @@ pub mod service;
 pub mod session_service;
 mod storage;
 mod tunnel;
+mod tunnel_proxy;
+pub use tunnel_proxy::{TunnelProxy, TUNNEL_PROXY_ENV};
 mod types;
 pub use local_status::{ComponentObservation, LocalEnvironmentStatus};
 pub use upgrade::{upgrade_observation, UpgradeObservation, UpgradeOutcome};

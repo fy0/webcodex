@@ -18,6 +18,7 @@ pub(crate) struct RegularServerTunnelOptions {
     pub(crate) bootstrap_token: String,
     pub(crate) runtime_parent: PathBuf,
     pub(crate) stop_on_stdin_eof: bool,
+    pub(crate) proxy: Option<webcodex_environment::TunnelProxy>,
 }
 
 struct RegularTunnelSession {
@@ -75,7 +76,7 @@ async fn run_regular_server_tunnel_inner(
     tokio::pin!(stop);
     let prerequisites = tokio::select! {
         _ = &mut stop => return Ok(()),
-        result = prepare_openai_tunnel() => result?,
+        result = prepare_openai_tunnel(options.proxy.as_ref()) => result?,
     };
     let deadline = Instant::now() + REGULAR_TUNNEL_STARTUP_TIMEOUT;
     let mcp_endpoint = mcp_url(&local_server_url);

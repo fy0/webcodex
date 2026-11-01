@@ -41,6 +41,48 @@ beforeEach(() => {
 });
 
 describe("Connections + Tools control surfaces", () => {
+  it("shows each override independently of the deliberately unusable global proxy", () => {
+    const initial = state();
+    initial.tunnel_proxy = { mode: "custom", custom_url: "http://127.0.0.1:1", effective_source: "custom", effective_proxy_present: true, system_proxy_detected: false };
+    initial.connections = connectionSnapshot(
+      connectionFixture({ id: "personal", name: "Personal", proxy: { mode: "custom", custom_url: "http://127.0.0.1:7891" } }),
+      connectionFixture({ id: "work", name: "Work", proxy: { mode: "custom", custom_url: "http://127.0.0.1:7892" } }),
+      connectionFixture({ id: "direct", name: "Direct", proxy: { mode: "direct" } }),
+    );
+    render(<Harness mode="connections" initial={initial} />);
+    expect(within(screen.getByRole("article", { name: "Personal" })).getByText("http://127.0.0.1:7891")).toBeInTheDocument();
+    expect(within(screen.getByRole("article", { name: "Work" })).getByText("http://127.0.0.1:7892")).toBeInTheDocument();
+    expect(within(screen.getByRole("article", { name: "Direct" })).queryByText("http://127.0.0.1:1")).not.toBeInTheDocument();
+  });
+
+  it("opens the failed connection's own proxy editor without changing the global tripwire", async () => {
+    const initial = state();
+    initial.connections = connectionSnapshot(connectionFixture({
+      id: "work", name: "Work", proxy: { mode: "custom", custom_url: "http://127.0.0.1:7892" },
+      lifecycle: "error", ready: false, last_error: "tunnel_unavailable", auto_proxy_used: false,
+    }));
+    api.saveTunnelProfile.mockResolvedValue(initial);
+    render(<Harness mode="connections" initial={initial} />);
+    fireEvent.click(within(screen.getByRole("article", { name: "Work" })).getByRole("button", { name: "Proxy settings" }));
+    expect(onSettings).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Connection proxy")).toHaveValue("custom");
+    expect(screen.getByDisplayValue("http://127.0.0.1:7892")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Save & Apply" }));
+    await waitFor(() => expect(api.saveTunnelProfile).toHaveBeenCalledWith(expect.objectContaining({
+      id: "work", proxy: { mode: "custom", custom_url: "http://127.0.0.1:7892" },
+    })));
+  });
+
+  it("does not blame a global Auto proxy for an explicitly direct connection", async () => {
+    const initial = state();
+    initial.tunnel_proxy = { mode: "auto", effective_source: "system", effective_proxy_present: true, system_proxy_detected: true };
+    initial.connections!.profiles[0].proxy = { mode: "direct" };
+    api.tunnelProfileAction.mockRejectedValueOnce({ code: "tunnel_unavailable", message: "Unavailable", next_action: "Retry" });
+    render(<Harness mode="connections" initial={initial} />);
+    fireEvent.click(screen.getByRole("button", { name: "Restart ChatGPT Personal" }));
+    expect(await screen.findByRole("alert")).not.toHaveTextContent("Auto currently uses a detected proxy");
+  });
+
   it("shows 2/3 connections without degrading runtime and routes each action by identity", async () => {
     render(<Harness mode="connections" />);
     expect(screen.getByText("2 of 3 tunnels locally ready")).toBeInTheDocument();

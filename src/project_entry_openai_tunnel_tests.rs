@@ -5,6 +5,7 @@ fn runtime_command_inherits_only_tunnel_authority_not_server_bootstrap_or_openai
     let prerequisites = OpenAiTunnelPrerequisites {
         binary: PathBuf::from("tunnel-client"),
         tunnel_id: "tunnel_0123456789abcdef0123456789abcdef".to_string(),
+        proxy: None,
     };
     let mut command = Command::new("tunnel-client");
     configure_runtime_command(
@@ -24,6 +25,46 @@ fn runtime_command_inherits_only_tunnel_authority_not_server_bootstrap_or_openai
         name.to_str() == Some("CONTROL_PLANE_TUNNEL_ID")
             && value.and_then(|value| value.to_str()) == Some(prerequisites.tunnel_id.as_str())
     }));
+}
+
+#[test]
+fn tunnel_runtime_route_overrides_global_and_never_retains_bypass_environment() {
+    for value in ["http://127.0.0.1:7891", "http://127.0.0.1:7892", "direct"] {
+        let proxy = TunnelProxy::parse(value).unwrap();
+        let prerequisites = OpenAiTunnelPrerequisites {
+            binary: PathBuf::from("tunnel-client"),
+            tunnel_id: "tunnel_0123456789abcdef0123456789abcdef".into(),
+            proxy: Some(proxy.clone()),
+        };
+        let mut command = Command::new("tunnel-client");
+        command
+            .env("HTTP_PROXY", "http://127.0.0.1:1")
+            .env("ALL_PROXY", "http://127.0.0.1:1")
+            .env("NO_PROXY", "*");
+        configure_runtime_command(
+            &mut command,
+            &prerequisites,
+            "http://127.0.0.1:8080/mcp",
+            Path::new("authorization"),
+        );
+        let env: std::collections::BTreeMap<_, _> = command.as_std().get_envs().collect();
+        for key in [
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "ALL_PROXY",
+            "http_proxy",
+            "https_proxy",
+            "all_proxy",
+        ] {
+            assert_eq!(env[OsStr::new(key)].and_then(|v| v.to_str()), proxy.url());
+        }
+        let bypass = if proxy.url().is_some() {
+            "127.0.0.1,localhost,::1"
+        } else {
+            "*"
+        };
+        assert_eq!(env[OsStr::new("NO_PROXY")].unwrap(), bypass);
+    }
 }
 
 #[test]

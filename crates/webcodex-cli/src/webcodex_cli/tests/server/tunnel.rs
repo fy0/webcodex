@@ -1,6 +1,27 @@
 use super::super::support::*;
 
 #[test]
+fn regular_tunnel_uses_its_saved_route_and_rejects_invalid_proxy_without_fallback() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("tunnel.env");
+    for value in ["http://127.0.0.1:7891", "http://127.0.0.1:7892", "direct"] {
+        std::fs::write(&path, format!("WEBCODEX_TUNNEL_PROXY={value}\n")).unwrap();
+        let proxy = crate::webcodex_cli::server::derive_regular_tunnel_proxy(&path)
+            .unwrap()
+            .unwrap();
+        assert_eq!(proxy.value(), value);
+    }
+    for value in [
+        "",
+        "socks5://localhost:1080",
+        "http://user:secret@localhost:80",
+    ] {
+        std::fs::write(&path, format!("WEBCODEX_TUNNEL_PROXY={value}\n")).unwrap();
+        assert!(crate::webcodex_cli::server::derive_regular_tunnel_proxy(&path).is_err());
+    }
+}
+
+#[test]
 fn server_tunnel_parser_is_machine_owned_and_openai_only() {
     let parsed = parse_server_tunnel(&args(&[
         "--provider",

@@ -784,6 +784,15 @@ impl DesktopCore {
                 for profile in self.tunnel_config.profiles() {
                     profiles.push(LegacyTunnelProfile {
                         profile_id: profile.id.to_string(),
+                        proxy: Some(
+                            webcodex_environment::TunnelProxy::parse(
+                                self.connection_proxy(profile.id)?
+                                    .url
+                                    .as_deref()
+                                    .unwrap_or("direct"),
+                            )
+                            .map_err(desktop_error)?,
+                        ),
                         start: process_is_active(
                             self.process_snapshot(ProcessKey::RegularTunnel(profile.id))
                                 .await,

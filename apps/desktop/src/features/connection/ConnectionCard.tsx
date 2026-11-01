@@ -2,7 +2,8 @@ import { useConnectionsTools, type ConnectionsToolsKey } from "../../i18n/connec
 import { useLocale } from "../../i18n/locale";
 import { useProduct } from "../../i18n/product";
 import { useShellText } from "../../i18n/runtime-shell";
-import { connectionActive, type TunnelConnection, type TunnelProfileAction } from "../../models/connections-tools";
+import { connectionActive, connectionProxyRoute, type TunnelConnection, type TunnelProfileAction } from "../../models/connections-tools";
+import type { TunnelProxySnapshot } from "../../models/topology";
 
 type Recovery = { title: ConnectionsToolsKey; action: ConnectionsToolsKey; settings: "network" | "runtime" | "diagnostics" };
 function recoveryFor(profile: TunnelConnection): Recovery {
@@ -33,12 +34,18 @@ function recoveryFor(profile: TunnelConnection): Recovery {
   }
 }
 
-export function ConnectionCard({ profile, canStart, busy, copied, onAction, onEdit, onDelete, onCopy, onSettings }: {
+export function ConnectionCard({ profile, globalProxy, canStart, busy, copied, onAction, onEdit, onDelete, onCopy, onSettings }: {
   profile: TunnelConnection; canStart: boolean; busy: boolean; copied: boolean;
+  globalProxy: TunnelProxySnapshot;
   onAction: (action: TunnelProfileAction) => void; onEdit: () => void; onDelete: () => void; onCopy: () => void;
   onSettings: (section: "network" | "runtime" | "diagnostics") => void;
 }) {
-  const p = useProduct(); const c = useConnectionsTools(); const s = useShellText(); const { formatTime } = useLocale();
+  const p = useProduct(); const c = useConnectionsTools(); const s = useShellText(); const { formatTime, t } = useLocale();
+  const proxy = connectionProxyRoute(profile, globalProxy);
+  const route = proxy.effective_source === "custom" ? proxy.custom_url ?? p("customProxy")
+    : proxy.effective_source === "system" ? p("systemProxy")
+    : proxy.effective_source === "environment" ? p("environmentProxy")
+    : proxy.effective_source === "direct" ? t("settings.tunnelProxyDirectValue") : p("unknown");
   const active = connectionActive(profile);
   // A failed child may already be reaped, but the enabled desired connection
   // still needs explicit Restart and Stop controls (Stop persists that intent).
@@ -57,8 +64,9 @@ export function ConnectionCard({ profile, canStart, busy, copied, onAction, onEd
     <header className="workspace-section-heading"><div><h2 id={`connection-${profile.id}`}>{profile.name}</h2><span className="workspace-observation">{c("secureTunnel")}</span></div><span className={`connection-state ${profile.ready ? "ready" : ""}`} role="status"><i className={`status-dot ${profile.ready ? "ready" : failed ? "error" : "unknown"}`} aria-hidden="true" />{status}</span></header>
     {(active || failed) && <dl className="connection-checks">{([[c("secureTunnel"), healthStale ? null : profile.tunnel_ready], [c("localMcp"), healthStale ? null : profile.local_mcp_ready]] as const).map(([label, ready]) => <div key={label}><dt>{label}</dt><dd><i className={`status-dot ${ready === true ? "ready" : ready === false ? "error" : "unknown"}`} aria-hidden="true" />{ready === true ? c("reachable") : ready === false ? c("unreachable") : healthStale ? c("awaitingStatus") : p("unknown")}</dd></div>)}</dl>}
     <div className="connection-id"><span>Tunnel ID</span><code>{profile.tunnel_id || "—"}</code>{profile.tunnel_id && <button type="button" className="text-button" aria-label={`${c("copyId")} ${profile.name}`} onClick={onCopy}>{copied ? p("copied") : c("copyId")}</button>}</div>
+    <p className="workspace-observation connection-proxy-route">{c("networkRoute")}: <strong>{route}</strong>{!profile.proxy && ` (${c("followGlobalProxy")})`}</p>
     {failed && <div className="connection-recovery" role="status"><strong>{c(recovery.title)}</strong><p>{c(recovery.action)}</p>{autoProxyRecovery && <p>{c("autoProxyHint")}</p>}
-      <button type="button" className="secondary-button" onClick={() => onSettings(recovery.settings)}>{recovery.settings === "network" ? c("proxySettings") : s(recovery.settings === "runtime" ? "Runtime" : "Troubleshooting")}</button>
+      <button type="button" className="secondary-button" disabled={busy} onClick={() => recovery.settings === "network" && profile.proxy ? onEdit() : onSettings(recovery.settings)}>{recovery.settings === "network" ? c("proxySettings") : s(recovery.settings === "runtime" ? "Runtime" : "Troubleshooting")}</button>
       <p className="connection-impact">{c("chatgptImpact")}</p>
     </div>}
     {!profile.credential_present && <p className="workspace-notice">{c("missingCredentials")}</p>}

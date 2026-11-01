@@ -77,6 +77,8 @@ pub trait LegacyOwner {
 pub struct LegacyTunnelProfile {
     pub profile_id: String,
     pub start: bool,
+    #[serde(default)]
+    pub proxy: Option<crate::TunnelProxy>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -464,6 +466,7 @@ async fn finish_tunnels(
                 lock,
                 &profile.profile_id,
                 Some(&credentials),
+                profile.proxy.as_ref(),
                 profile.start,
             )
             .await?;

@@ -57,6 +57,8 @@ pub struct ConnectionLogEntry {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ConnectionRuntimeSnapshot {
+    #[serde(default)]
+    pub proxy_route: Option<crate::models::TunnelProxySnapshot>,
     pub lifecycle: ConnectionLifecycle,
     pub pid: Option<u32>,
     pub health: ConnectionHealth,

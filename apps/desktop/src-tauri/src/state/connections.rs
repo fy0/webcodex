@@ -200,6 +200,15 @@ impl DesktopCore {
             &mut self.snapshot.connections,
             self.snapshot.readiness.runtime_ready,
         );
+        for profile in &mut self.snapshot.connections.profiles {
+            profile.runtime.proxy_route = Some(tunnel_proxy_snapshot(
+                profile
+                    .config
+                    .proxy
+                    .as_ref()
+                    .unwrap_or(&self.config.tunnel_proxy),
+            ));
+        }
         if self.config.persistent_environment.is_some() {
             let store = super::environment::store();
             let native = webcodex_environment::NativeEnvironment::new();
@@ -265,10 +274,14 @@ impl DesktopCore {
             cancellation.check()?;
             let store = super::environment::store()?;
             let credentials = self.tunnel_config.credentials_for(id)?;
+            let proxy = self.connection_proxy(id)?;
+            let proxy =
+                webcodex_environment::TunnelProxy::parse(proxy.url.as_deref().unwrap_or("direct"))
+                    .map_err(super::environment::desktop_error)?;
             let native = webcodex_environment::NativeEnvironment::new()
                 .map_err(super::environment::desktop_error)?;
             native
-                .configure_tunnel(&store, &id.to_string(), Some(&credentials))
+                .configure_tunnel(&store, &id.to_string(), Some(&credentials), Some(&proxy))
                 .await
                 .map_err(super::environment::desktop_error)?;
             return Ok(());
@@ -329,12 +342,8 @@ impl DesktopCore {
             .join("regular-tunnel-runtime");
         let local_mcp_url = format!("{}/mcp", runtime.server_url.trim_end_matches('/'));
         self.adapter.ensure_binaries(cancellation).await?;
-        let proxy_config = self
-            .tunnel_config
-            .proxy_for(id)
-            .unwrap_or(&self.config.tunnel_proxy);
-        let proxy = effective_tunnel_proxy(proxy_config)?;
-        let auto_proxy_used = proxy_config.mode == TunnelProxyMode::Auto && proxy.url.is_some();
+        let proxy = self.connection_proxy(id)?;
+        let auto_proxy_used = matches!(proxy.source, "environment" | "system");
         let mut command = self
             .adapter
             .regular_tunnel_command(&env_file, proxy.url.as_deref())?;
@@ -362,6 +371,14 @@ impl DesktopCore {
             self.activity.clone(),
         );
         Ok(())
+    }
+
+    pub(super) fn connection_proxy(&self, id: TunnelProfileId) -> DesktopResult<EffectiveTunnelProxy> {
+        effective_tunnel_proxy(
+            self.tunnel_config
+                .proxy_for(id)
+                .unwrap_or(&self.config.tunnel_proxy),
+        )
     }
 
     pub(super) async fn stop_connection_process(

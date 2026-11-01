@@ -7,6 +7,7 @@ pub struct RegularServerTunnelOptions {
     pub bootstrap_token: String,
     pub runtime_parent: PathBuf,
     pub stop_on_stdin_eof: bool,
+    pub proxy: Option<webcodex_environment::TunnelProxy>,
 }
 
 pub async fn run_regular_server_tunnel(options: RegularServerTunnelOptions) -> Result<(), String> {
@@ -23,6 +24,7 @@ pub async fn run_regular_server_tunnel_with_stop(
             bootstrap_token: options.bootstrap_token,
             runtime_parent: options.runtime_parent,
             stop_on_stdin_eof: options.stop_on_stdin_eof,
+            proxy: options.proxy,
         },
         stop,
     )

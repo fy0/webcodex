@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::{Duration, Instant, SystemTime};
 use tokio::process::{Child, Command};
+use webcodex_environment::TunnelProxy;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -46,6 +47,7 @@ struct TunnelClientAsset {
 pub(super) struct OpenAiTunnelPrerequisites {
     pub(super) binary: PathBuf,
     pub(super) tunnel_id: String,
+    proxy: Option<TunnelProxy>,
 }
 
 #[derive(Debug)]
@@ -78,11 +80,17 @@ impl OpenAiTunnel {
     }
 }
 
-pub(super) async fn prepare_openai_tunnel() -> Result<OpenAiTunnelPrerequisites, ProductError> {
+pub(super) async fn prepare_openai_tunnel(
+    proxy: Option<&TunnelProxy>,
+) -> Result<OpenAiTunnelPrerequisites, ProductError> {
     let tunnel_id = required_tunnel_id()?;
     require_runtime_api_key()?;
     let binary = resolve_tunnel_client().await?;
-    Ok(OpenAiTunnelPrerequisites { binary, tunnel_id })
+    Ok(OpenAiTunnelPrerequisites {
+        binary,
+        tunnel_id,
+        proxy: proxy.cloned(),
+    })
 }
 
 pub(super) async fn start_openai_tunnel(
@@ -147,6 +155,9 @@ fn configure_runtime_command(
     authorization_file: &Path,
 ) {
     remove_npm_wrapper_network_environment(command);
+    if let Some(proxy) = &prerequisites.proxy {
+        proxy.configure_command(command.as_std_mut());
+    }
     command
         .env("CONTROL_PLANE_TUNNEL_ID", &prerequisites.tunnel_id)
         // The runtime key remains in the inherited environment. Explicitly keep
@@ -228,6 +239,9 @@ async fn run_control_plane_probe(
     let mut command = Command::new(&prerequisites.binary);
     suppress_windows_console(&mut command);
     remove_npm_wrapper_network_environment(&mut command);
+    if let Some(proxy) = &prerequisites.proxy {
+        proxy.configure_command(command.as_std_mut());
+    }
     command
         .arg("admin")
         .arg("tunnels")

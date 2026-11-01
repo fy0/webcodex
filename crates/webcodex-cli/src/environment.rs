@@ -717,7 +717,9 @@ async fn run_inner(args: &[String]) -> Result<String, String> {
             let status = if component == service::Component::Tunnel {
                 let profile = input.profile.as_deref().unwrap_or("default");
                 if operation == ServiceOperation::Start {
-                    core.backend.configure_tunnel(&store, profile, None).await
+                    core.backend
+                        .configure_tunnel(&store, profile, None, None)
+                        .await
                 } else {
                     core.backend
                         .control_tunnel(&store, profile, operation)
@@ -758,7 +760,7 @@ async fn run_inner(args: &[String]) -> Result<String, String> {
             };
             let status = core
                 .backend
-                .configure_tunnel(&store, profile, credentials.as_ref())
+                .configure_tunnel(&store, profile, credentials.as_ref(), None)
                 .await
                 .map_err(|e| e.to_string())?;
             if input.json {

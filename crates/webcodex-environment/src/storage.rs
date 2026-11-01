@@ -300,18 +300,26 @@ pub(crate) fn atomic_private_write(path: &Path, bytes: &[u8]) -> SetupResultValu
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{
-            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            MoveFileExW, ReplaceFileW, MOVEFILE_WRITE_THROUGH,
         };
         let source: Vec<u16> = temporary.as_os_str().encode_wide().chain(Some(0)).collect();
         let target: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
-        if unsafe {
-            MoveFileExW(
-                source.as_ptr(),
-                target.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        } == 0
-        {
+        // ReplaceFile preserves the target DACL, including a Tunnel service SID.
+        let replaced = unsafe {
+            if path.exists() {
+                ReplaceFileW(
+                    target.as_ptr(),
+                    source.as_ptr(),
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null(),
+                    std::ptr::null(),
+                )
+            } else {
+                MoveFileExW(source.as_ptr(), target.as_ptr(), MOVEFILE_WRITE_THROUGH)
+            }
+        };
+        if replaced == 0 {
             return Err(SetupDiagnostic::io());
         }
     }
@@ -320,6 +328,118 @@ pub(crate) fn atomic_private_write(path: &Path, bytes: &[u8]) -> SetupResultValu
         .and_then(|file| file.sync_all())
         .map_err(|_| SetupDiagnostic::io())?;
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
+    use windows_sys::Win32::Security::{
+        GetFileSecurityW, GetSecurityDescriptorControl, GetSecurityDescriptorDacl,
+        SetFileSecurityW, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        SE_DACL_PROTECTED,
+    };
+
+    fn dacl(path: &[u16]) -> Vec<u8> {
+        let mut size = 0;
+        unsafe {
+            GetFileSecurityW(
+                path.as_ptr(),
+                DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                0,
+                &mut size,
+            )
+        };
+        assert!(size > 0);
+        let mut bytes = vec![0u8; size as usize];
+        assert_ne!(
+            unsafe {
+                GetFileSecurityW(
+                    path.as_ptr(),
+                    DACL_SECURITY_INFORMATION,
+                    bytes.as_mut_ptr().cast(),
+                    size,
+                    &mut size,
+                )
+            },
+            0
+        );
+        let mut control = 0;
+        let mut revision = 0;
+        let mut acl = std::ptr::null_mut();
+        let mut present = 0;
+        let mut defaulted = 0;
+        unsafe {
+            assert_ne!(
+                GetSecurityDescriptorControl(
+                    bytes.as_mut_ptr().cast(),
+                    &mut control,
+                    &mut revision
+                ),
+                0
+            );
+            assert_ne!(control & SE_DACL_PROTECTED, 0);
+            assert_ne!(
+                GetSecurityDescriptorDacl(
+                    bytes.as_mut_ptr().cast(),
+                    &mut present,
+                    &mut acl,
+                    &mut defaulted
+                ),
+                0
+            );
+            assert_ne!(present, 0);
+            assert!(!acl.is_null());
+            // ReplaceFile may set SE_DACL_AUTO_INHERITED; compare the actual
+            // ACEs and protection, not incidental descriptor bookkeeping.
+            std::slice::from_raw_parts(acl.cast::<u8>(), (*acl).AclSize as usize).to_vec()
+        }
+    }
+
+    #[test]
+    fn atomic_replacement_preserves_service_read_acl() {
+        let temp = crate::test_tempdir().unwrap();
+        let path = temp.path().join("private/tunnel.env");
+        atomic_private_write(&path, b"fixture-first").unwrap();
+        let account = crate::service::current_account().unwrap();
+        // LocalService stands in for an installer-granted service SID. No
+        // actual service is created or given access to non-fixture data.
+        let sddl: Vec<u16> = format!(
+            "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;{})(A;;GR;;;LS)\0",
+            account.identity,
+        )
+        .encode_utf16()
+        .collect();
+        let mut descriptor = std::ptr::null_mut();
+        assert_ne!(
+            unsafe {
+                ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl.as_ptr(),
+                    1,
+                    &mut descriptor,
+                    std::ptr::null_mut(),
+                )
+            },
+            0
+        );
+        let wide: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+        let applied = unsafe {
+            SetFileSecurityW(
+                wide.as_ptr(),
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                descriptor,
+            )
+        };
+        unsafe { LocalFree(descriptor) };
+        assert_ne!(applied, 0);
+        let original = dacl(&wide);
+        atomic_private_write(&path, b"fixture-second").unwrap();
+        assert_eq!(dacl(&wide), original);
+        assert_eq!(std::fs::read(&path).unwrap(), b"fixture-second");
+    }
 }
 
 #[cfg(windows)]

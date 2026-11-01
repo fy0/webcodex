@@ -606,7 +606,7 @@ pub(crate) async fn share(options: &ShareCommandOptions) -> Result<(), ProductEr
     };
     let openai_prerequisites = match options.tunnel {
         TunnelProvider::OpenAiSecure => {
-            Some(super::openai_tunnel_service::prepare_openai_tunnel().await?)
+            Some(super::openai_tunnel_service::prepare_openai_tunnel(None).await?)
         }
         TunnelProvider::CloudflareQuick | TunnelProvider::None => None,
     };
