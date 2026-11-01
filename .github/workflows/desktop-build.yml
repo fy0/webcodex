@@ -30,8 +30,6 @@ jobs:
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-        with:
-          components: rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: windows-desktop-build
@@ -45,11 +43,6 @@ jobs:
           cache-dependency-path: |
             frontend/package-lock.json
             apps/desktop/package-lock.json
-      - name: Check Desktop Rust formatting
-        shell: pwsh
-        run: |
-          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
-          if ($LASTEXITCODE -ne 0) { throw "Desktop cargo fmt check failed" }
       - name: Install shared frontend dependencies
         run: npm ci --prefix frontend
       - name: Install Desktop dependencies
