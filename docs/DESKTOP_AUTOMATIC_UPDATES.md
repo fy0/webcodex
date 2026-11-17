@@ -1,5 +1,9 @@
 # Desktop automatic stable updates
 
+> Desktop builds from this fork have upstream update checks, downloads, and
+> installation disabled. Install a package built from this fork to update.
+> The rest of this document describes the upstream workflow.
+
 Desktop updates the unified installation, not just the Tauri executable. The
 product path is **stable discovery → automatic verified download → explicit
 installation confirmation → existing Environment upgrade → reconciliation**.

@@ -340,6 +340,7 @@ async fn register_failure_runner(runtime: &ToolRuntime) {
             revision: None,
             root_fingerprint: None,
             lineage: None,
+            git_repository: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

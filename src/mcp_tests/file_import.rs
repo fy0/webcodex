@@ -302,6 +302,7 @@ async fn mcp_import_runtime_inner(
             revision: None,
             root_fingerprint: None,
             lineage: None,
+            git_repository: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

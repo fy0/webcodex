@@ -269,6 +269,27 @@ mod durability_tests {
         assert_eq!(projects[0].id, "demo");
     }
 
+    #[test]
+    fn registry_inventory_reports_git_marker_without_status_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let registry = tmp.path().join("registry");
+        let worktree = tmp.path().join("worktree");
+        let project = worktree.join("nested");
+        std::fs::create_dir(&registry).unwrap();
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(worktree.join(".git"), "gitdir: elsewhere\n").unwrap();
+        let content = build_project_toml("demo", "Demo", project.to_str().unwrap(), &None, true);
+        std::fs::write(registry.join("demo.toml"), content).unwrap();
+
+        let projects = load_runner_project_summaries_from_dir(&registry);
+        assert_eq!(projects.len(), 1);
+        let summary = &projects[0];
+        assert_eq!(summary.git_repository, Some(true));
+        assert!(summary.git_branch.is_none());
+        assert!(summary.git_head.is_none());
+        assert!(summary.git_dirty.is_none());
+    }
+
     #[cfg(unix)]
     #[test]
     fn project_summary_reports_retargeted_symlinks_as_distinct_canonical_roots() {
@@ -301,14 +322,14 @@ mod durability_tests {
             managed_operation_id: None,
         };
 
-        let first_summary = runner_project_summary(&project, 1, false);
+        let first_summary = runner_project_summary(&project, 1);
         assert_eq!(
             Path::new(&first_summary.path),
             first.canonicalize().unwrap()
         );
         std::fs::remove_file(&link).unwrap();
         symlink(&second, &link).unwrap();
-        let second_summary = runner_project_summary(&project, 2, false);
+        let second_summary = runner_project_summary(&project, 2);
         assert_eq!(
             Path::new(&second_summary.path),
             second.canonicalize().unwrap()

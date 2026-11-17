@@ -695,6 +695,7 @@ fn lifecycle_summary(output: &Value, id: &str) -> Option<RunnerProjectSummary> {
             None | Some(Value::Null) => None,
             Some(value) => Some(serde_json::from_value(value.clone()).ok()?),
         },
+        git_repository: None,
         git_branch: None,
         git_head: None,
         git_dirty: None,

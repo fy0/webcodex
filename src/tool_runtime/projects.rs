@@ -1015,11 +1015,10 @@ fn project_source(project: &RunnerProjectSummary) -> &'static str {
 }
 
 fn project_git_available(project: &crate::runner_protocol::RunnerProjectSummary) -> Option<bool> {
-    if project.git_branch.is_some() || project.git_head.is_some() || project.git_dirty.is_some() {
-        Some(true)
-    } else {
-        Some(false)
-    }
+    Some(project.git_repository.unwrap_or_else(|| {
+        // Older Runners only reported Git metadata, with no repository hint.
+        project.git_branch.is_some() || project.git_head.is_some() || project.git_dirty.is_some()
+    }))
 }
 
 fn smoke_marker_present(project: &crate::runner_protocol::RunnerProjectSummary) -> bool {
@@ -1217,6 +1216,7 @@ fn parse_project_summary_from_result(
             .and_then(Value::as_str)
             .map(str::to_string),
         lineage,
+        git_repository: None,
         git_branch: None,
         git_head: None,
         git_dirty: None,
@@ -1244,6 +1244,7 @@ mod tests {
             revision: None,
             root_fingerprint: None,
             lineage: None,
+            git_repository: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,
@@ -1268,6 +1269,7 @@ mod tests {
             revision: None,
             root_fingerprint: None,
             lineage: None,
+            git_repository: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

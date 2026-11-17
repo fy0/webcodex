@@ -116,6 +116,9 @@ The canonical `next_call_gap_ms` is attached to the arriving request and measure
 
 ## Stable updates
 
+Desktop builds from this fork do not check for or install upstream updates.
+The following describes the upstream updater.
+
 After the UI is ready, Desktop performs a bounded public GitHub stable-release check without authentication. Startup/network/rate-limit failures are silent and do not change readiness. The existing Desktop state caches attempts for 24 hours; a manual check can retry immediately and reports an ordinary local message on failure.
 
 A valid official `webcodex-release-manifest.json` provides release/runtime versions and the management contract range. Overlap means the current Desktop remains compatible with that Runtime; a disjoint range requires updating Desktop. Missing, malformed, mismatched or unknown compatibility metadata never guesses compatibility. Desktop update availability compares the release version to the installed Desktop version, separately from Runtime compatibility.

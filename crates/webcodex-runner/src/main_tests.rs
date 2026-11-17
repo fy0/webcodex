@@ -1767,7 +1767,7 @@ fn legacy_managed_project_without_explicit_lineage_stays_unassociated() {
     assert!(parsed.managed_worktree);
     assert!(parsed.managed_source_project_id.is_none());
     assert!(parsed.managed_source_root_fingerprint.is_none());
-    assert!(runner_project_summary(&parsed, 1, false).lineage.is_none());
+    assert!(runner_project_summary(&parsed, 1).lineage.is_none());
 }
 
 #[test]

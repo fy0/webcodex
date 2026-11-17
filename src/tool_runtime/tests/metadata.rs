@@ -674,9 +674,7 @@ async fn list_projects_reports_smoke_selection_capabilities() {
     test_mcp.name = Some("Test MCP".to_string());
     let mut smoke = registered_project("webcodex-smoke", "/tmp/webcodex-smoke");
     smoke.name = Some("WebCodex Smoke Workspace".to_string());
-    smoke.git_branch = Some("main".to_string());
-    smoke.git_head = Some("abc1234".to_string());
-    smoke.git_dirty = Some(false);
+    smoke.git_repository = Some(true);
     register_agent_with_projects(
         &runtime,
         "special",

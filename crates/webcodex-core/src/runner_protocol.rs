@@ -1256,6 +1256,10 @@ pub struct RunnerProjectSummary {
     /// names, Git remotes, registration provenance, or project kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lineage: Option<RunnerProjectLineage>,
+    /// Whether the Runner found a Git worktree marker for the Project root.
+    /// This is an inventory hint; no Git command or worktree scan is involved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_repository: Option<bool>,
     #[serde(default)]
     pub git_branch: Option<String>,
     #[serde(default)]

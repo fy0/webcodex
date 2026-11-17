@@ -54,6 +54,7 @@ fn project_summary(id: &str, path: &str) -> RunnerProjectSummary {
         revision: None,
         root_fingerprint: None,
         lineage: None,
+        git_repository: None,
         git_branch: Some("codex".to_string()),
         git_head: Some("9a7d3ce".to_string()),
         git_dirty: Some(false),

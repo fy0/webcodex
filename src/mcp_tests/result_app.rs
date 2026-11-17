@@ -1854,6 +1854,7 @@ async fn register_job_runner(runtime: &ToolRuntime, auth: &crate::auth::AuthCont
             revision: None,
             root_fingerprint: None,
             lineage: None,
+            git_repository: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

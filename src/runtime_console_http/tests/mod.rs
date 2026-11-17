@@ -42,6 +42,7 @@ fn project(id: &str, private_path: &str) -> RunnerProjectSummary {
         revision: Some(format!("sha256:{}", "1".repeat(64))),
         root_fingerprint: None,
         lineage: None,
+        git_repository: None,
         git_branch: None,
         git_head: None,
         git_dirty: None,

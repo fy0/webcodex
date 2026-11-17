@@ -278,6 +278,7 @@ async fn request_policy_pending_wait_and_terminal_observe_keep_one_execution_wit
             revision: None,
             root_fingerprint: None,
             lineage: None,
+            git_repository: None,
             git_branch: None,
             git_head: None,
             git_dirty: None,

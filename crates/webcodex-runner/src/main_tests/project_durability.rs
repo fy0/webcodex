@@ -42,7 +42,7 @@ allow_patch = true
     )
     .unwrap();
     assert_eq!(project.registration_source, None);
-    let summary = runner_project_summary(&project, 1, false);
+    let summary = runner_project_summary(&project, 1);
     assert_eq!(
         summary.revision.as_deref(),
         Some("sha256:1275b96a7ed780e5fb6eecc9c4a0132bb8c2f358cb9ecf7415bc02aaab22f653"),
@@ -56,7 +56,7 @@ allow_patch = true
 
     let mut conflicting = project.clone();
     conflicting.registration_source = Some("explicit".to_string());
-    let summary = runner_project_summary(&conflicting, 1, false);
+    let summary = runner_project_summary(&conflicting, 1);
     assert_eq!(summary.registration_source.as_deref(), Some("explicit"));
 }
 

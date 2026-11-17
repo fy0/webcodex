@@ -6,6 +6,20 @@ use crate::updates::{
 use webcodex_environment::unified_update::UpdateError;
 
 const DESKTOP_VERSION: &str = env!("CARGO_PKG_VERSION");
+// This fork must not discover or install upstream builds over the bundled runtime.
+const STABLE_UPDATES_ENABLED: bool = false;
+
+fn ensure_stable_updates_enabled() -> DesktopResult<()> {
+    if STABLE_UPDATES_ENABLED {
+        Ok(())
+    } else {
+        Err(DesktopError::new(
+            "updates_disabled",
+            "Update checks are disabled in this build",
+            "Use a package built from this WebCodex fork to update.",
+        ))
+    }
+}
 
 fn action_error() -> DesktopError {
     DesktopError::new(
@@ -64,6 +78,7 @@ impl AppState {
     }
 
     pub async fn check_for_updates(&self, manual: bool) -> DesktopResult<UpdateStatus> {
+        ensure_stable_updates_enabled()?;
         let _guard = self.update_check.lock().await;
         let now = runtime_selection::now_ms();
         let cache = {
@@ -132,6 +147,7 @@ impl AppState {
     }
 
     pub async fn download_update(&self, version: &str) -> DesktopResult<UpdateStatus> {
+        ensure_stable_updates_enabled()?;
         let cache = {
             let slot = self.core.lock().await;
             slot.as_ref()
@@ -170,6 +186,7 @@ impl AppState {
         &self,
         enabled: bool,
     ) -> DesktopResult<UpdateStatus> {
+        ensure_stable_updates_enabled()?;
         let mut slot = self.core.lock().await;
         let core = slot
             .as_mut()
@@ -198,6 +215,7 @@ impl AppState {
         version: &str,
         confirmed: bool,
     ) -> DesktopResult<bool> {
+        ensure_stable_updates_enabled()?;
         if !confirmed {
             return Err(action_error());
         }
@@ -247,6 +265,7 @@ impl AppState {
     }
 
     pub async fn open_latest_release(&self) -> DesktopResult<()> {
+        ensure_stable_updates_enabled()?;
         let slot = self.core.lock().await;
         let core = slot
             .as_ref()

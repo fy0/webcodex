@@ -1037,7 +1037,7 @@ doctor = ["git status --short"]
 "#,
     )
     .unwrap();
-    let summary = runner_project_summary(&project, 123456, false);
+    let summary = runner_project_summary(&project, 123456);
     assert_eq!(summary.id, "webcodex");
     assert_eq!(summary.name.as_deref(), Some("webcodex"));
     assert_eq!(summary.path, "/root/git/webcodex");

@@ -19,7 +19,6 @@ use crate::runner_protocol::{
 };
 
 const PROJECT_SCAN_CACHE_MS: u64 = 5000;
-const PROJECT_GIT_TIMEOUT: Duration = Duration::from_secs(2);
 // Tree shutdown also has to let the bounded stdout/stderr readers observe EOF.
 // Darwin process-group teardown and reader scheduling can legitimately take
 // longer than 500ms on loaded native CI hosts, so keep a short but realistic
@@ -452,14 +451,6 @@ pub(super) fn run_git_bounded_with_program(
     })
 }
 
-fn run_git_capture(path: &str, args: &[&str], shutdown: Option<&AtomicBool>) -> Option<String> {
-    let output = run_git_bounded(Path::new(path), args, PROJECT_GIT_TIMEOUT, shutdown).ok()?;
-    if !output.status.success() || output.stdout_capped {
-        return None;
-    }
-    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-}
-
 pub(super) fn project_revision(project: &RunnerProjectFile) -> String {
     let normalized = toml::to_string(project).unwrap_or_default();
     format!("sha256:{:x}", Sha256::digest(normalized.as_bytes()))
@@ -541,11 +532,9 @@ pub(super) fn project_lineage(project: &RunnerProjectFile) -> Option<RunnerProje
     })
 }
 
-fn runner_project_summary_with_shutdown(
+pub(crate) fn runner_project_summary(
     project: &RunnerProjectFile,
     updated_at: i64,
-    include_git: bool,
-    shutdown: Option<&AtomicBool>,
 ) -> RunnerProjectSummary {
     let mut hooks = project.hooks.keys().cloned().collect::<Vec<_>>();
     hooks.sort();
@@ -557,27 +546,18 @@ fn runner_project_summary_with_shutdown(
         .ok()
         .filter(|path| path.is_dir());
     let root_fingerprint = canonical_root.as_deref().map(project_root_fingerprint);
+    // A worktree or submodule has a .git file; an ordinary repository has a
+    // .git directory. Only check ancestor markers, including for nested projects.
+    let git_repository = canonical_root.as_deref().map(|root| {
+        root.ancestors().any(|directory| {
+            std::fs::symlink_metadata(directory.join(".git"))
+                .is_ok_and(|marker| marker.is_dir() || marker.is_file())
+        })
+    });
     let resolved_path = canonical_root
         .unwrap_or_else(|| PathBuf::from(&project.path))
         .to_string_lossy()
         .to_string();
-    let (git_branch, git_head, git_dirty) = if include_git {
-        let branch = run_git_capture(
-            &resolved_path,
-            &["rev-parse", "--abbrev-ref", "HEAD"],
-            shutdown,
-        );
-        let head = run_git_capture(
-            &resolved_path,
-            &["log", "-1", "--pretty=format:%h"],
-            shutdown,
-        );
-        let dirty = run_git_capture(&resolved_path, &["status", "--short"], shutdown)
-            .map(|status| !status.trim().is_empty());
-        (branch, head, dirty)
-    } else {
-        (None, None, None)
-    };
     let registration_source = effective_registration_source(project);
     // Rolling-upgrade shim: old Servers only know the historical `kind`
     // sentinel. New auto-registered records keep persisted `kind` empty, but
@@ -596,21 +576,13 @@ fn runner_project_summary_with_shutdown(
         revision: Some(project_revision(project)),
         root_fingerprint,
         lineage: project_lineage(project),
-        git_branch,
-        git_head,
-        git_dirty,
+        git_repository,
+        git_branch: None,
+        git_head: None,
+        git_dirty: None,
         updated_at,
         shell_profile: project.shell_profile.clone(),
     }
-}
-
-#[cfg(test)]
-pub(crate) fn runner_project_summary(
-    project: &RunnerProjectFile,
-    updated_at: i64,
-    include_git: bool,
-) -> RunnerProjectSummary {
-    runner_project_summary_with_shutdown(project, updated_at, include_git, None)
 }
 
 fn warn_empty_hook_commands(source: &Path, project: &RunnerProjectFile) {
@@ -691,9 +663,7 @@ fn load_runner_project_summaries_from_dir_with_shutdown(
             continue;
         }
         warn_empty_hook_commands(&file, &project);
-        projects.push(runner_project_summary_with_shutdown(
-            &project, updated_at, true, shutdown,
-        ));
+        projects.push(runner_project_summary(&project, updated_at));
     }
     projects.sort_by(|a, b| a.id.cmp(&b.id));
     projects

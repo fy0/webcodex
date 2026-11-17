@@ -8,8 +8,6 @@ import { ComputerPermissions } from "./features/settings/ComputerPermissions";
 import { Sidebar } from "./components/Sidebar";
 import { useDesktopWorkspace } from "./hooks/useDesktopWorkspace";
 import { desktopApi } from "./lib/desktop-api";
-import { useRuntimeUpdates } from "./hooks/useRuntimeUpdates";
-import { UpdateBanner } from "./features/settings/AboutPanel";
 import { ReadinessBanner } from "./features/dashboard/ReadinessBanner";
 import { useShellText } from "./i18n/runtime-shell";
 import type {
@@ -35,7 +33,6 @@ function DesktopApp() {
   const [extensionTab, setExtensionTab] = useState<ExtensionTab>();
   const [settingsSection, setSettingsSection] = useState<"diagnostics" | "runtime" | "network" | "access" | undefined>();
   const { state, activity, navigation, setNavigation, refreshing, preserveWorkspacePollDeadline, error, setError, cancelSubmittingId, showSetup, setShowSetup, setStartupAttempt, mainRef, commitState, openSetup, refresh, resumeRuntime, cancelCurrentOperation, runStateOperation } = useDesktopWorkspace();
-  const updates = useRuntimeUpdates(Boolean(state && !state.current_operation && !state.configuration_issue));
   const openSettings = (section: "diagnostics" | "runtime" | "network" | "access") => { setSettingsSection(section); setNavigation("settings"); };
   if (!state) {
     return (
@@ -112,7 +109,6 @@ function DesktopApp() {
         )}
         {error && !(navigation === "home" && state.runtime_error?.code === error.code) && <><AppError error={error} /><div className="shell-actions"><button type="button" className="secondary-button" onClick={() => openSettings("diagnostics")}>{s("Diagnostics")}</button><button type="button" className="text-button" onClick={() => openSettings("runtime")}>{s("Select another Runtime")}</button></div></>}
         {navigation !== "settings" && <ComputerPermissions welcome />}
-        {navigation === "home" && <UpdateBanner updates={updates} />}
         {navigation === "home" && (state.topology || state.configuration_issue || state.runtime_error) && <ReadinessBanner state={state} onState={commitState} onDiagnostics={() => openSettings("diagnostics")} onRuntime={() => openSettings("runtime")} onConnection={() => setNavigation("connection")} onProviders={kind => { setExtensionTab(kind === "mcp" ? "mcpProviders" : "codingAgents"); setNavigation("extensions"); }} />}
         {navigation === "home" && !state.configuration_issue && (needsSetup ? (
           <FirstRun
@@ -139,7 +135,7 @@ function DesktopApp() {
         {navigation === "activity" && <ActivityPanel activity={activity} />}
         {navigation === "extensions" && <ExtensionsPanel state={state} onState={commitState} initialTab={extensionTab} />}
         {navigation === "console" && <RuntimeConsolePanel state={state} onSettings={() => openSettings("runtime")} />}
-        {navigation === "settings" && <SettingsPanel state={state} onState={commitState} onChangeSetup={openSetup} onStopRuntime={() => void runStateOperation(desktopApi.stopLocalRuntime)} initialSection={settingsSection} onActivity={() => setNavigation("activity")} onConnection={() => setNavigation("connection")} updates={updates} />}
+        {navigation === "settings" && <SettingsPanel state={state} onState={commitState} onChangeSetup={openSetup} onStopRuntime={() => void runStateOperation(desktopApi.stopLocalRuntime)} initialSection={settingsSection} onActivity={() => setNavigation("activity")} onConnection={() => setNavigation("connection")} />}
       </main>
     </div></WorkspaceProvider>
   );
